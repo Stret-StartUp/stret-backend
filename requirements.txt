@@ -3,3 +3,10 @@ uvicorn
 pandas
 openpyxl
 python-multipart
+pydantic-settings
+python-dotenv
+sqlalchemy
+aiomysql
+cryptography
+scikit-learn
+joblib

@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated ML datasets
+app/ml/data/*.csv
+!app/ml/data/.gitkeep
+app/ml/models/*.joblib
+!app/ml/models/.gitkeep
+app/ml/reports/*.json
+!app/ml/reports/.gitkeep
