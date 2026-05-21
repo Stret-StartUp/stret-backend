@@ -8,6 +8,10 @@ Responsabilidades:
   * Similaridade dos eventos onde aparecem
   * Características do cliente (idade, valor gasto, frequência)
   * Compatibilidade com evento alvo (afinidade, preço, vibe)
+
+Integração com Intelligent Weighting:
+- Usa pesos aprendíveis do IntelligentWeightingService
+- Permite otimizar pesos com histórico de compras reais
 """
 
 from dataclasses import dataclass
@@ -25,6 +29,7 @@ from app.services.analytics.feature_builder import (
     _ticket_score,
     _vibe_score,
 )
+from app.services.analytics.intelligent_weighting import IntelligentWeightingService
 from app.services.ingestion.parser_service import EventFeatures
 
 
@@ -160,52 +165,65 @@ def _calculate_customer_scores(
     aggregated_df: pd.DataFrame,
     target: EventFeatures,
 ) -> pd.DataFrame:
-    """Calcula scores finais para cada cliente."""
+    """
+    Calcula scores finais para cada cliente usando ponderação inteligente.
+    
+    Usa IntelligentWeightingService que permite aprender pesos
+    baseado em histórico de compras reais.
+    """
     df = aggregated_df.copy()
 
-    # Calcular scores individuais
+    # Calcular scores individuais (SEM ponderação, pesos vêm do WeightingService)
     df["event_similarity_score"] = df["event_similarity_weighted"]
 
     df["affinity_score"] = df.apply(
-        lambda row: _affinity_score(row, target) * settings.AFFINITY_WEIGHT,
+        lambda row: _affinity_score(row, target),
         axis=1,
     )
 
     df["ticket_score"] = df.apply(
-        lambda row: _ticket_score(row.get("valor_medio"), target.price) * settings.TICKET_WEIGHT,
+        lambda row: _ticket_score(row.get("valor_medio"), target.price),
         axis=1,
     )
 
     df["age_score"] = df.apply(
-        lambda row: _age_score(row.get("idade"), target) * settings.AGE_WEIGHT,
+        lambda row: _age_score(row.get("idade"), target),
         axis=1,
     )
 
     df["frequency_score"] = df.apply(
-        lambda row: _frequency_score(row.get("freq_compra")) * settings.FREQUENCY_WEIGHT,
+        lambda row: _frequency_score(row.get("freq_compra")),
         axis=1,
     )
 
-    # Para purchase_timing, usamos freq_compra como proxy
     df["purchase_timing_score"] = df.apply(
-        lambda row: _purchase_timing_score([]) * settings.PURCHASE_TIMING_WEIGHT,
+        lambda row: _purchase_timing_score([]),
         axis=1,
     )
 
     df["vibe_score"] = df.apply(
-        lambda row: _vibe_score(row, target) * settings.VIBE_WEIGHT,
+        lambda row: _vibe_score(row, target),
         axis=1,
     )
 
-    # Score final: event_similarity tem peso principal nessa nova estrutura
-    df["score"] = (
-        df["event_similarity_score"] * 2.5  # Dobro do peso pois isso agora é crítico
-        + df["affinity_score"]
-        + df["ticket_score"]
-        + df["age_score"]
-        + df["frequency_score"]
-        + df["purchase_timing_score"]
-        + df["vibe_score"]
-    )
+    # Usar IntelligentWeightingService para score final ponderado
+    weighting_service = IntelligentWeightingService()
+    
+    # Preparar features para o serviço de ponderação
+    features_list = []
+    for idx, row in df.iterrows():
+        features = {
+            "event_similarity_score": row["event_similarity_score"],
+            "affinity_score": row["affinity_score"],
+            "ticket_score": row["ticket_score"],
+            "age_score": row["age_score"],
+            "frequency_score": row["frequency_score"],
+            "purchase_timing_score": row["purchase_timing_score"],
+            "vibe_score": row["vibe_score"],
+        }
+        features_list.append(features)
+    
+    # Calcular scores com pesos aprendíveis
+    df["score"] = weighting_service.batch_score(features_list)
 
     return df

@@ -8,5 +8,6 @@ python-dotenv
 sqlalchemy
 aiomysql
 cryptography
+scipy
 pytest
 httpx
