@@ -190,6 +190,43 @@ class TestIntelligentWeightingService:
         success = service.update_weights(new_weights)
         assert not success
 
+    def test_update_weights_all_zero(self):
+        """Testa atualização com pesos todos zero."""
+        service = IntelligentWeightingService()
+
+        new_weights = {
+            "event_similarity_weight": 0.0,
+            "affinity_weight": 0.0,
+            "ticket_weight": 0.0,
+            "age_weight": 0.0,
+            "purchase_timing_weight": 0.0,
+            "vibe_weight": 0.0,
+            "frequency_weight": 0.0,
+        }
+
+        success = service.update_weights(new_weights)
+        assert not success
+
+    def test_update_weights_normalizes(self):
+        """Testa que pesos são normalizados para soma igual a 1."""
+        service = IntelligentWeightingService()
+
+        new_weights = {
+            "event_similarity_weight": 0.3,
+            "affinity_weight": 0.3,
+            "ticket_weight": 0.2,
+            "age_weight": 0.1,
+            "purchase_timing_weight": 0.05,
+            "vibe_weight": 0.03,
+            "frequency_weight": 0.02,
+        }
+
+        success = service.update_weights(new_weights)
+        assert success
+
+        weights = service.get_weights()
+        assert pytest.approx(sum(weights.values()), rel=1e-6) == 1.0
+
     def test_reset_to_defaults(self):
         """Testa reset para valores padrão."""
         service = IntelligentWeightingService()

@@ -94,34 +94,6 @@ async def update_weights(new_weights: Dict[str, float]):
     }
 
 
-@router.post("/optimize-weights")
-async def optimize_weights_from_history(
-    historical_data_path: Optional[str] = Query(None),
-    threshold: float = Query(0.5, ge=0.0, le=1.0),
-    max_iterations: int = Query(1000, ge=100),
-):
-    """
-    Otimiza pesos usando histórico de compras.
-    
-    ⚠️ ENDPOINT PLACEHOLDER: Requer integração com dados reais
-    
-    Query params:
-    - historical_data_path: Caminho para arquivo CSV com histórico
-    - threshold: Threshold para classificação (default 0.5)
-    - max_iterations: Máximo de iterações (default 1000)
-    
-    CSV esperado:
-    event_similarity_score,affinity_score,ticket_score,age_score,purchase_timing_score,vibe_score,frequency_score,bought
-    0.8,0.7,0.6,0.5,0.4,0.3,0.2,1
-    ...
-    """
-    raise HTTPException(
-        status_code=501,
-        detail="Endpoint de otimização requer implementação de upload de histórico. "
-               "Use o POST /api/v1/upload para adicionar histórico primeiro."
-    )
-
-
 @router.post("/validate-weights")
 async def validate_weights(weights: Dict[str, float]):
     """

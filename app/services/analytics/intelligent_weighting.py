@@ -47,11 +47,12 @@ class IntelligentWeights:
         return cls.from_dict(data)
 
     def validate(self) -> bool:
-        """Valida que todos os pesos são não-negativos."""
-        for weight in asdict(self).values():
+        """Valida que todos os pesos são não-negativos e somam mais que zero."""
+        weights = asdict(self)
+        for weight in weights.values():
             if weight < 0:
                 return False
-        return True
+        return sum(weights.values()) > 0
 
 
 class IntelligentWeightingService:
@@ -156,7 +157,8 @@ class IntelligentWeightingService:
             if not updated.validate():
                 return False
 
-            self.weights = updated
+            normalized = {k: v / sum(updated.to_dict().values()) for k, v in updated.to_dict().items()}
+            self.weights = IntelligentWeights.from_dict(normalized)
             self._save_weights()
             return True
 

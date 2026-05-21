@@ -1,0 +1,9 @@
+{
+  "event_similarity_weight": 0.25,
+  "affinity_weight": 0.25,
+  "ticket_weight": 0.15,
+  "age_weight": 0.1,
+  "purchase_timing_weight": 0.1,
+  "vibe_weight": 0.08,
+  "frequency_weight": 0.07
+}

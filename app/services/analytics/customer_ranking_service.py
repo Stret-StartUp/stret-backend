@@ -57,6 +57,7 @@ def rank_customers_for_event(
 
     # ETAPA 2: Avaliar clientes de eventos similares
     evaluation_result = evaluate_customers_from_similar_events(
+        target=target,
         similar_events=similar_events,
         min_event_similarity=min_event_similarity,
     )
