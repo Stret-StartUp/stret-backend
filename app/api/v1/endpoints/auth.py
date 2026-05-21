@@ -23,7 +23,6 @@ async def register(
     """
     repo = UserRepository(db)
     
-    # Verificar se o email já existe
     existing_user = await repo.get_by_email(user_data.email)
     if existing_user:
         raise HTTPException(
@@ -31,7 +30,6 @@ async def register(
             detail="Email já cadastrado",
         )
     
-    # Criar novo usuário
     user = await repo.create(
         email=user_data.email,
         password=user_data.password,
@@ -56,7 +54,6 @@ async def login(
     """
     repo = UserRepository(db)
     
-    # Autenticar usuário
     user = await repo.authenticate(user_data.email, user_data.password)
     if not user:
         raise HTTPException(
@@ -64,7 +61,6 @@ async def login(
             detail="Email ou senha incorretos",
         )
     
-    # Criar token de acesso
     access_token = create_access_token(subject=str(user.id))
     
     return Token(access_token=access_token, token_type="bearer")
