@@ -21,7 +21,7 @@ anteriores para estimar quais consumidores combinam melhor com um evento alvo.
 Exemplo:
 
 - Um produtor envia historicos de festas universitarias, open bar, eventos
-  premium, festas de funk, eventos corporativos etc.
+  premium, festas, eventos corporativos etc.
 - Depois ele cadastra o escopo de um novo evento.
 - A API cruza o perfil do evento alvo com o comportamento historico dos
   consumidores.
@@ -216,6 +216,42 @@ Tambem e possivel informar uma URL completa:
 
 ```env
 DATABASE_URL=mysql+aiomysql://eventrank_user:sua_senha@localhost:3306/eventrank?charset=utf8mb4
+
+## Endpoint de co-attendance
+
+Endpoint:
+
+```text
+POST /api/v1/analytics/most-connected
+```
+
+Responsabilidades:
+
+- analisar todos os eventos de um `client_id`;
+- construir um grafo em que clientes sao conectados por participacao em eventos em comum;
+- calcular clientes com mais arestas e mais eventos compartilhados;
+- retornar um JSON com os clientes mais conectados e seus parceiros principais.
+
+Parâmetros:
+
+- `top_n`: numero de clientes mais conectados a retornar;
+- `min_shared_events`: numero minimo de eventos compartilhados para contar a conexao;
+- `top_partners`: quantos parceiros mais relevantes incluir para cada cliente.
+
+## Testes
+
+O projeto agora inclui testes unitarios e de endpoint em `tests/`.
+
+Rodar todos os testes:
+
+```powershell
+python -m pytest tests
+```
+
+Os testes verificam:
+
+- o calculo do grafo de co-attendance em `app/services/analytics/coattendance_service.py`;
+- o endpoint `POST /api/v1/analytics/most-connected` em `app/api/v1/endpoints/analytics.py`.
 ```
 
 Quando `DATABASE_URL` estiver definida, ela tem prioridade sobre as variaveis
@@ -295,74 +331,11 @@ O backend ja possui:
 - perfil textual de consumidor;
 - configuracao por `.env`;
 - script de teste de conexao com banco;
-- criacao automatica de tabelas via `app.db.init_db`;
-- modulo inicial de ML para gerar dataset treinavel em `app/ml/build_training_data.py`;
-- baseline supervisionado com `scikit-learn` em `app/ml/train_model.py`.
+- criacao automatica de tabelas via `app.db.init_db`.
 
-## Evolucao para Machine Learning
+## Documentacao de API
 
-A primeira fase de ML ja transforma o historico salvo no MySQL em um dataset
-supervisionado.
-
-Problema de treino:
-
-```text
-Entrada: (cliente, evento)
-Saida: comprou ou nao comprou
-```
-
-Labels:
-
-```text
-1 = cliente comprou o evento alvo
-0 = cliente nao comprou o evento alvo
-```
-
-O dataset reutiliza as features do ranking atual:
-
-```text
-affinity_score
-ticket_score
-age_score
-purchase_timing_score
-vibe_score
-frequency_score
-score
-```
-
-Comando:
-
-```powershell
-.\.venv\Scripts\python.exe -m app.ml.build_training_data
-```
-
-Output:
-
-```text
-app/ml/data/training_dataset.csv
-```
-
-Mais detalhes estao em `ML_PIPELINE.md`.
-
-A segunda fase de ML tambem ja treina baselines supervisionados:
-
-```powershell
-.\.venv\Scripts\python.exe -m app.ml.train_model
-```
-
-Modelos treinados:
-
-```text
-logistic_regression
-random_forest
-```
-
-Outputs locais:
-
-```text
-app/ml/models/baseline_model.joblib
-app/ml/reports/baseline_metrics.json
-```
+A documentacao da API atualizada esta em `API_REFERENCE.md`.
 
 ## Proximos passos sugeridos
 

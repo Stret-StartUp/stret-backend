@@ -48,12 +48,13 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379"
 
     # Scoring weights
-    AFFINITY_WEIGHT: float = 0.30
-    TICKET_WEIGHT: float = 0.20
-    AGE_WEIGHT: float = 0.15
-    PURCHASE_TIMING_WEIGHT: float = 0.15
-    VIBE_WEIGHT: float = 0.10
-    FREQUENCY_WEIGHT: float = 0.10
+    EVENT_SIMILARITY_WEIGHT: float = 0.25
+    AFFINITY_WEIGHT: float = 0.25
+    TICKET_WEIGHT: float = 0.15
+    AGE_WEIGHT: float = 0.10
+    PURCHASE_TIMING_WEIGHT: float = 0.10
+    VIBE_WEIGHT: float = 0.08
+    FREQUENCY_WEIGHT: float = 0.07
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,

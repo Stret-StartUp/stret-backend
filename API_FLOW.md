@@ -1,19 +1,63 @@
 # API flow
 
-O fluxo principal usa historico acumulado:
+O fluxo principal usa historico acumulado com pipeline de 3 etapas:
 
-1. `POST /api/v1/upload`
-   - salva um evento historico e os consumidores do Excel no MySQL.
-   - pode ser chamado varias vezes para o mesmo `client_id`.
+## 1. Upload de Histórico
 
-2. `POST /api/v1/query`
-   - recebe o escopo do evento alvo.
-   - compara esse evento com todo o historico salvo para o `client_id`.
-   - retorna um Excel com o ranking.
+`POST /api/v1/upload`
+- Salva um evento histórico e os consumidores do Excel no MySQL.
+- Pode ser chamado varias vezes para o mesmo `client_id`.
 
-3. `POST /api/v1/profile`
-   - recebe o escopo do evento alvo.
-   - analisa o perfil de consumidor a partir do historico salvo.
+## 2. Query - Ranking de Consumidores (FLUXO PRINCIPAL)
+
+`POST /api/v1/query`
+- Recebe o escopo do evento alvo.
+- Executa pipeline de 3 etapas:
+
+### ETAPA 1: Ranking de Eventos
+- Compara evento alvo com todos os eventos históricos.
+- Calcula score de similaridade para cada evento (0.0 a 1.0).
+- Retorna eventos ordenados por similaridade.
+
+### ETAPA 2: Avaliação de Consumidores
+- Coleta consumidores dos eventos similares.
+- Categoriza cada consumidor por similaridade do seu evento:
+  - **HIGH** (score >= 0.7): Eventos muito similares
+  - **MEDIUM** (score 0.4-0.7): Eventos medianamente similares
+  - **LOW** (score < 0.4): Eventos pouco similares
+- **Importante**: Consumidores em eventos similares recebem peso maior.
+
+### ETAPA 3: Scoring Final
+- Agrega consumidores por email.
+- Calcula score final para evento alvo com pesos:
+  - Similaridade do evento: **2.5x** (principal fator - novo!)
+  - Afinidade: 1.0x
+  - Preço: 1.0x
+  - Idade: 0.5x
+  - Frequência de compra: 1.0x
+  - Timing de compra: 1.0x
+  - Vibe: 0.5x
+- Retorna Excel com consumidores ranqueados.
+
+## 3. Profile - Análise de Perfil
+
+`POST /api/v1/profile`
+- Recebe o escopo do evento alvo.
+- Analisa o perfil de consumidor a partir do historico salvo.
+
+---
+
+## Mudanças na Lógica
+
+### Antes
+- Todos os consumidores tinha peso igual, independente da similaridade do evento que apareciam.
+
+### Agora
+- Consumidores em eventos muito similares (score 0.9) têm peso 3x maior que em eventos pouco similares (score 0.3).
+- Ponderação explícita por categoria de evento (HIGH/MEDIUM/LOW).
+- Score de similaridade do evento é fator principal (2.5x de peso).
+
+---
 
 `/api/v1/process` foi removido do roteador publico.
 

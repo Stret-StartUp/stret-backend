@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, Form, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.services.analytics.scoring_service import score_clients
-from app.services.ingestion.database_storage_service import load_client_history
+from app.repositories.event_repository import EventRepository
+from app.services.analytics.customer_ranking_service import rank_customers_for_event
 from app.services.ingestion.parser_service import build_event_features, has_event_scope
 from app.utils.file_handler import generate_excel
 
@@ -29,9 +29,9 @@ async def query_data(
     brands: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
-    history = await load_client_history(db, client_id)
+    historical_events = await EventRepository(db).get_with_customers_by_client(client_id)
 
-    if history is None or history.df.empty:
+    if not historical_events:
         return {"error": "Nenhum dado encontrado para esse cliente"}
 
     current_event_features = build_event_features(
@@ -59,12 +59,13 @@ async def query_data(
             ),
         )
 
-    df_scored = score_clients(
-        history.df,
-        history.event_features,
-        current_event_features
+    result = rank_customers_for_event(
+        target=current_event_features,
+        historical_events=historical_events,
+        top_n=100,
     )
 
-    df_filtered = df_scored.head(100)
+    if result.ranked_customers.empty:
+        return {"error": "Nenhum cliente encontrado nos eventos historicos desse cliente"}
 
-    return generate_excel(df_filtered)
+    return generate_excel(result.ranked_customers)
