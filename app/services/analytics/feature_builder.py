@@ -1,14 +1,20 @@
+import math
+import unicodedata
 from dataclasses import dataclass
 from typing import Iterable
 
 import pandas as pd
 
-from app.core.config import settings
 from app.services.ingestion.parser_service import EventFeatures
 
 
 @dataclass
 class CustomerFeatureBreakdown:
+    """
+    Scores BRUTOS (0–1) por feature, sem ponderação.
+    A ponderação é responsabilidade exclusiva do IntelligentWeightingService.
+    """
+
     event_similarity: float = 0.0
     affinity: float = 0.0
     ticket: float = 0.0
@@ -17,17 +23,8 @@ class CustomerFeatureBreakdown:
     vibe: float = 0.0
     frequency: float = 0.0
 
-    @property
-    def total(self) -> float:
-        return (
-            self.event_similarity
-            + self.affinity
-            + self.ticket
-            + self.age
-            + self.purchase_timing
-            + self.vibe
-            + self.frequency
-        )
+    # Removido: `total` — somar scores brutos sem pesos não tem significado.
+    # Use IntelligentWeightingService.score_customer() para obter o score final.
 
 
 FEATURE_COLUMNS = [
@@ -46,6 +43,13 @@ def build_customer_features(
     candidates_df: pd.DataFrame,
     target: EventFeatures,
 ) -> pd.DataFrame:
+    """
+    Calcula features brutas (0–1) para cada cliente.
+
+    NÃO aplica pesos — isso é responsabilidade do IntelligentWeightingService.
+    A coluna `score` é preenchida com 0.0 como placeholder; quem a popula
+    com valor final é _apply_learned_weights no customer_evaluation_service.
+    """
     if candidates_df.empty:
         return candidates_df.copy()
 
@@ -62,24 +66,26 @@ def build_customer_features(
     df["purchase_timing_score"] = breakdowns.apply(lambda b: b.purchase_timing)
     df["vibe_score"] = breakdowns.apply(lambda b: b.vibe)
     df["frequency_score"] = breakdowns.apply(lambda b: b.frequency)
-    df["score"] = breakdowns.apply(lambda b: b.total)
 
-    # Backward-compatible column names used by previous exports.
+    # Placeholder — será sobrescrito pelo IntelligentWeightingService
+    df["score"] = 0.0
+
+    # Backward-compatible column names
     df["similarity_score"] = df["affinity_score"]
     df["lote_score"] = df["purchase_timing_score"]
     return df
 
 
 def _calculate_breakdown(row: pd.Series, target: EventFeatures) -> CustomerFeatureBreakdown:
+    """Retorna scores BRUTOS, sem multiplicar por nenhum peso."""
     return CustomerFeatureBreakdown(
-        event_similarity=_event_similarity_score(row) * settings.EVENT_SIMILARITY_WEIGHT,
-        affinity=_affinity_score(row, target) * settings.AFFINITY_WEIGHT,
-        ticket=_ticket_score(row.get("valor_medio"), target.price) * settings.TICKET_WEIGHT,
-        age=_age_score(row.get("idade"), target) * settings.AGE_WEIGHT,
-        purchase_timing=_purchase_timing_score(row.get("eventos_passados", []))
-        * settings.PURCHASE_TIMING_WEIGHT,
-        vibe=_vibe_score(row, target) * settings.VIBE_WEIGHT,
-        frequency=_frequency_score(row.get("freq_compra")) * settings.FREQUENCY_WEIGHT,
+        event_similarity=_event_similarity_score(row),
+        affinity=_affinity_score(row, target),
+        ticket=_ticket_score(row.get("valor_medio"), target.price),
+        age=_age_score(row.get("idade"), target),
+        purchase_timing=_purchase_timing_score(row.get("eventos_passados", [])),
+        vibe=_vibe_score(row, target),
+        frequency=_frequency_score(row.get("freq_compra")),
     )
 
 
@@ -204,10 +210,23 @@ def _vibe_score(row: pd.Series, target: EventFeatures) -> float:
 
 
 def _frequency_score(freq_compra) -> float:
+    """
+    Score logarítmico — discrimina bem nos valores reais (1–5 eventos).
+
+    Antes: linear com step 0.05 → freq=3 valia 0.15 (quase zero)
+    Agora: log base 6 → freq=1→0.39, freq=2→0.63, freq=3→0.77, freq=5→1.0
+    """
     if _is_null(freq_compra):
         return 0.0
-    return min(int(freq_compra) * 0.05, 1.0)
+    freq = int(freq_compra)
+    if freq <= 0:
+        return 0.0
+    return min(math.log(freq + 1) / math.log(6), 1.0)
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _as_list(value) -> list:
     if _is_null(value):
@@ -235,15 +254,22 @@ def _contains_term(target_term: str, row_terms: list[str]) -> bool:
 
 
 def _normalize(value) -> str:
+    """
+    Normaliza texto: lowercase + strip + remove acentos.
+
+    Unificado com event_similarity_service para evitar mismatches silenciosos
+    (ex: 'universitário' vs 'universitario' antes quebravam o vibe_score).
+    """
     if _is_null(value):
         return ""
-    return str(value).strip().lower()
+    text = str(value).strip().lower()
+    text = unicodedata.normalize("NFKD", text)
+    return "".join(char for char in text if not unicodedata.combining(char))
 
 
 def _is_null(value) -> bool:
     if value is None:
         return True
-
     try:
         return bool(pd.isna(value))
     except (TypeError, ValueError):

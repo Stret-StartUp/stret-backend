@@ -6,11 +6,10 @@ Responsabilidades:
 - Categorizar clientes por quão similares foram seus eventos
 - Dar maior peso a clientes em eventos muito similares
 - Agregar informações de múltiplos eventos
-- Aplicar scoring ponderado (fixo ou aprendido via IntelligentWeightingService)
+- Aplicar scoring ponderado via IntelligentWeightingService (única fonte de pesos)
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 import pandas as pd
 
@@ -24,9 +23,9 @@ from app.services.ingestion.parser_service import EventFeatures
 class CustomerCategory:
     """Categoria de cliente baseada em eventos similares."""
 
-    HIGH = "high"    # Score de evento >= 0.7
+    HIGH = "high"      # Score de evento >= 0.7
     MEDIUM = "medium"  # Score de evento 0.4 a 0.7
-    LOW = "low"      # Score de evento < 0.4
+    LOW = "low"        # Score de evento < 0.4
 
 
 @dataclass
@@ -34,9 +33,9 @@ class CustomerEvaluationResult:
     """Resultado da avaliação de clientes."""
 
     all_customers: pd.DataFrame
-    high_category: pd.DataFrame    # Eventos com score >= 0.7
-    medium_category: pd.DataFrame  # Eventos com score 0.4-0.7
-    low_category: pd.DataFrame     # Eventos com score < 0.4
+    high_category: pd.DataFrame
+    medium_category: pd.DataFrame
+    low_category: pd.DataFrame
 
 
 def evaluate_customers_from_similar_events(
@@ -48,21 +47,12 @@ def evaluate_customers_from_similar_events(
     """
     Avalia clientes com base em eventos similares.
 
-    Prioriza clientes que aparecem em eventos muito similares ao target.
-    Aplica scoring ponderado usando IntelligentWeightingService (se disponível)
-    ou pesos fixos do settings como fallback.
+    Fluxo de scoring:
+    1. build_customer_features → calcula scores BRUTOS (0–1), sem pesos
+    2. _apply_learned_weights  → aplica pesos via IntelligentWeightingService
 
-    Args:
-        similar_events: Eventos já ranqueados por similaridade
-        target: Features do evento alvo (usado para calcular affinity, ticket, etc.)
-        min_event_similarity: Score mínimo para incluir evento (0.0 a 1.0)
-        use_learned_weights: Se True, usa pesos aprendidos do IntelligentWeightingService.
-                             Se False, usa pesos fixos do settings (comportamento anterior).
-
-    Returns:
-        CustomerEvaluationResult com clientes categorizados por relevância
+    Não há double-weighting: os pesos do settings não são usados no feature_builder.
     """
-    # Coletar todos os registros de clientes com suas categorias
     all_records = []
 
     for similar_event in similar_events:
@@ -85,7 +75,7 @@ def evaluate_customers_from_similar_events(
                     "valor_medio": customer.valor_medio,
                     "freq_compra": customer.freq_compra,
                     "eventos_passados": customer.eventos_passados or [],
-                    # Campos de similaridade de evento — usados pelo feature_builder
+                    # Campos de similaridade de evento
                     "weighted_event_similarity": similar_event.similarity_score,
                     "max_event_similarity": similar_event.similarity_score,
                     "avg_event_similarity": similar_event.similarity_score,
@@ -120,18 +110,14 @@ def evaluate_customers_from_similar_events(
 
     all_df = pd.DataFrame(all_records)
 
-    # Calcular todas as features individuais (event_similarity, affinity, ticket, etc.)
-    # O feature_builder já aplica os pesos fixos do settings e popula a coluna "score"
+    # ETAPA 1: scores brutos — feature_builder NÃO aplica pesos
     all_df = build_customer_features(all_df, target)
 
-    # Se use_learned_weights=True, sobrescreve a coluna "score" com o scoring
-    # ponderado pelos pesos aprendidos via IntelligentWeightingService.
-    # As features individuais (event_similarity_score, affinity_score, etc.)
-    # já foram calculadas acima e são reutilizadas — só a ponderação muda.
+    # ETAPA 2: ponderação — única fonte de pesos é o IntelligentWeightingService
     if use_learned_weights:
         all_df = _apply_learned_weights(all_df)
 
-    # Separar por categoria de evento de origem
+    # Separar por categoria
     high_df = all_df[all_df["event_similarity_score"] >= 0.7].copy()
     medium_df = all_df[
         (all_df["event_similarity_score"] >= 0.4) & (all_df["event_similarity_score"] < 0.7)
@@ -148,25 +134,14 @@ def evaluate_customers_from_similar_events(
 
 def _apply_learned_weights(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Recalcula a coluna 'score' usando pesos aprendidos do IntelligentWeightingService.
+    Calcula score final usando IntelligentWeightingService.
 
-    As features individuais (event_similarity_score, affinity_score, etc.) já foram
-    calculadas pelo feature_builder SEM os pesos — aqui aplicamos os pesos aprendidos.
-
-    Importante: o feature_builder já multiplica cada feature pelo peso do settings,
-    então precisamos das features "cruas" (sem peso) para reponderar corretamente.
-    Usamos as colunas _score diretamente, que o feature_builder popula antes de
-    multiplicar pelos pesos.
-
-    Args:
-        df: DataFrame com colunas de feature scores já calculadas
-
-    Returns:
-        DataFrame com coluna 'score' atualizada
+    Recebe features brutas (0–1) do feature_builder e aplica os pesos
+    aprendidos. É a ÚNICA etapa que pondera — não há multiplicação prévia
+    pelos pesos do settings.
     """
     weighting = IntelligentWeightingService()
 
-    # Colunas que o IntelligentWeightingService espera
     feature_cols = [
         "event_similarity_score",
         "affinity_score",
@@ -177,18 +152,11 @@ def _apply_learned_weights(df: pd.DataFrame) -> pd.DataFrame:
         "frequency_score",
     ]
 
-    # Verifica se todas as colunas existem
     missing = [col for col in feature_cols if col not in df.columns]
     if missing:
-        # Fallback silencioso: mantém o score calculado pelo feature_builder
+        # Fallback silencioso: mantém score placeholder do build_customer_features
         return df
 
-    # Nota: as colunas _score no DataFrame já estão multiplicadas pelos pesos do
-    # settings (ex: event_similarity_score = raw_score * EVENT_SIMILARITY_WEIGHT).
-    # O IntelligentWeightingService vai ponderar novamente com seus próprios pesos,
-    # então passamos os valores como estão — o scoring relativo ainda é correto.
-    # Para uma separação perfeita, o feature_builder precisaria expor as features
-    # cruas (sem peso), mas isso exigiria refatoração maior.
     records = df[feature_cols].to_dict(orient="records")
     df = df.copy()
     df["score"] = weighting.batch_score(records)

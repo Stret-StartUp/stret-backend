@@ -19,7 +19,6 @@ from typing import Optional
 
 import pandas as pd
 
-from app.core.config import settings
 from app.services.analytics.feature_builder import (
     CustomerFeatureBreakdown,
     _affinity_score,
@@ -68,9 +67,8 @@ def score_customers_for_target_event(
         CustomerScoringResult com clientes ranqueados e scores
     """
     if evaluated_customers_df.empty:
-        empty_df = pd.DataFrame()
         return CustomerScoringResult(
-            ranked_customers=empty_df,
+            ranked_customers=pd.DataFrame(),
             total_customers=0,
             customers_scored=0,
         )
@@ -90,7 +88,7 @@ def score_customers_for_target_event(
             customers_scored=0,
         )
 
-    # Calcular scores para evento alvo
+    # Calcular scores brutos + score final ponderado via IntelligentWeightingService
     aggregated = _calculate_customer_scores(aggregated, target)
 
     # Ordenar por score decrescente
@@ -119,7 +117,6 @@ def _aggregate_customers_by_email(
     records = []
 
     for email, group in df.groupby("email_normalized"):
-        # Calcular média ponderada por categoria
         high_scores = group[group["event_category"] == "high"]["event_similarity_score"]
         medium_scores = group[group["event_category"] == "medium"]["event_similarity_score"]
         low_scores = group[group["event_category"] == "low"]["event_similarity_score"]
@@ -138,6 +135,14 @@ def _aggregate_customers_by_email(
 
         event_similarity_weighted = weighted_sum / total_weight if total_weight > 0 else 0.0
 
+        # Agrega eventos_passados de todos os registros do cliente
+        all_eventos_passados = []
+        for ep in group["eventos_passados"].dropna():
+            if isinstance(ep, list):
+                all_eventos_passados.extend(ep)
+            elif ep:
+                all_eventos_passados.append(ep)
+
         records.append(
             {
                 "email": group["email"].iloc[0],
@@ -147,6 +152,7 @@ def _aggregate_customers_by_email(
                 "faculdade": group["faculdade"].mode()[0] if not group["faculdade"].isna().all() else None,
                 "valor_medio": group["valor_medio"].mean() if not group["valor_medio"].isna().all() else None,
                 "freq_compra": group["freq_compra"].sum() if not group["freq_compra"].isna().all() else 0,
+                "eventos_passados": all_eventos_passados,  # preservado para purchase_timing_score
                 "event_count": len(group),
                 "high_category_count": len(high_scores),
                 "medium_category_count": len(medium_scores),
@@ -155,6 +161,11 @@ def _aggregate_customers_by_email(
                 "event_similarity_weighted": event_similarity_weighted,
                 "event_similarity_max": group["event_similarity_score"].max(),
                 "event_similarity_avg": group["event_similarity_score"].mean(),
+                # Campos históricos do evento de maior similaridade (para vibe/affinity)
+                "historical_event_vibe": group.loc[group["event_similarity_score"].idxmax(), "historical_event_vibe"]
+                    if "historical_event_vibe" in group.columns else None,
+                "historical_event_description": group.loc[group["event_similarity_score"].idxmax(), "historical_event_description"]
+                    if "historical_event_description" in group.columns else None,
             }
         )
 
@@ -166,14 +177,14 @@ def _calculate_customer_scores(
     target: EventFeatures,
 ) -> pd.DataFrame:
     """
-    Calcula scores finais para cada cliente usando ponderação inteligente.
-    
-    Usa IntelligentWeightingService que permite aprender pesos
-    baseado em histórico de compras reais.
+    Calcula scores BRUTOS para cada feature e score final via IntelligentWeightingService.
+
+    Não aplica pesos manualmente — toda a ponderação fica no WeightingService,
+    evitando double-weighting.
     """
     df = aggregated_df.copy()
 
-    # Calcular scores individuais (SEM ponderação, pesos vêm do WeightingService)
+    # Scores brutos (0–1), sem multiplicar por nenhum peso
     df["event_similarity_score"] = df["event_similarity_weighted"]
 
     df["affinity_score"] = df.apply(
@@ -196,8 +207,9 @@ def _calculate_customer_scores(
         axis=1,
     )
 
+    # CORRIGIDO: usa eventos_passados do cliente, não lista vazia hardcoded
     df["purchase_timing_score"] = df.apply(
-        lambda row: _purchase_timing_score([]),
+        lambda row: _purchase_timing_score(row.get("eventos_passados", [])),
         axis=1,
     )
 
@@ -206,13 +218,11 @@ def _calculate_customer_scores(
         axis=1,
     )
 
-    # Usar IntelligentWeightingService para score final ponderado
+    # Score final: única ponderação, feita pelo IntelligentWeightingService
     weighting_service = IntelligentWeightingService()
-    
-    # Preparar features para o serviço de ponderação
-    features_list = []
-    for idx, row in df.iterrows():
-        features = {
+
+    features_list = [
+        {
             "event_similarity_score": row["event_similarity_score"],
             "affinity_score": row["affinity_score"],
             "ticket_score": row["ticket_score"],
@@ -221,9 +231,9 @@ def _calculate_customer_scores(
             "purchase_timing_score": row["purchase_timing_score"],
             "vibe_score": row["vibe_score"],
         }
-        features_list.append(features)
-    
-    # Calcular scores com pesos aprendíveis
+        for _, row in df.iterrows()
+    ]
+
     df["score"] = weighting_service.batch_score(features_list)
 
     return df
